@@ -1,5 +1,6 @@
 package com.beepiz.cameracoroutines.sample.extensions.media
 
+import android.annotation.SuppressLint
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
@@ -13,23 +14,22 @@ import com.beepiz.cameracoroutines.sample.extensions.CamCharacteristics.LensFaci
 import com.beepiz.cameracoroutines.sample.extensions.outputSizes
 import com.beepiz.cameracoroutines.sample.recording.VideoRecorder
 import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.CoroutineScope
 import kotlinx.coroutines.experimental.async
 import splitties.systemservices.cameraManager
 import splitties.uithread.isUiThread
-import kotlin.coroutines.experimental.coroutineContext
 
-suspend fun recordVideo(
+suspend fun CoroutineScope.recordVideo(
         lensFacing: LensFacing,
         outputPath: String,
-        awaitStop: suspend () -> Unit
-) {
-    recordVideo(lensFacing.intValue, outputPath, awaitStop)
-}
+        awaitStop: suspend CoroutineScope.() -> Unit
+) = recordVideo(lensFacing.intValue, outputPath, awaitStop)
 
-private suspend fun recordVideo(
+@SuppressLint("MissingPermission")
+private suspend fun CoroutineScope.recordVideo(
         lensFacing: Int,
         outputPath: String,
-        awaitStop: suspend () -> Unit
+        awaitStop: suspend CoroutineScope.() -> Unit
 ) {
     //TODO("Try coroutines experimental dispatcher")
     //TODO("Try main thread async dispatcher for default UI thread usage")
@@ -38,7 +38,8 @@ private suspend fun recordVideo(
         val characteristics = camManager.getCameraCharacteristics(it)
         characteristics[CameraCharacteristics.LENS_FACING] == lensFacing
     } ?: throw NoSuchElementException("No camera with requested facing ($lensFacing) found")
-    val recorderAsync = async(coroutineContext + CommonPool) {
+
+    val recorderAsync = async(CommonPool) {
         val camCharacteristics = camManager.getCameraCharacteristics(camId)
         val configMap = camCharacteristics[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]
         val videoSize = VideoRecorder.chooseVideoSize(configMap.outputSizes<MediaCodec>())
@@ -47,8 +48,9 @@ private suspend fun recordVideo(
             setupForVideoRecording(videoSize, sensorOrientation, outputPath)
         }
     }
-    cameraManager.openAndUseCamera(camId) { camera ->
-        recorderAsync.await().use { recorder ->
+
+    openAndUseCamera(camManager, camId) { camera ->
+        with(recorderAsync.await()) { recorder ->
             val surfaces = listOf(recorder.surface)
             camera.createAndUseSession(surfaces) { session ->
                 session.awaitConfiguredState()
